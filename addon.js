@@ -82,7 +82,7 @@ function findBestMatch(searchResults, queryTitle, queryYear) {
             yearMatches: isYearMatch(result.year, queryYear)
         }))
         .filter((candidate) => candidate.titleScore >= 85 && candidate.yearMatches)
-        .sort((a, b) => b.titleScore - a.titleScore)[0] ? .result || null;
+        .sort((a, b) => b.titleScore - a.titleScore)[0]?.result || null;
 }
 
 builder.defineStreamHandler(async(args) => {

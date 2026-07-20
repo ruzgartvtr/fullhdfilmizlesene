@@ -12,6 +12,9 @@ const DIZIFILMIZLE_BASE = 'https://dizifilmizle.to';
 const DDIZI_BASE = 'https://www.ddizi.im';
 const TVDIZILER_BASE = 'https://tvdiziler.tv';
 const YOUTUBE_BASE = 'https://www.youtube.com';
+const SINEKFILM_BASE = 'https://sinekfilmizle.com';
+const TURK_PLAYER_BASE = 'https://p.2turk.xyz';
+const AVSAR_BASE = 'https://www.avsarfilm.com.tr';
 
 const DEFAULT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -81,6 +84,7 @@ function htmlDecode(text = '') {
     .replace(/\\\"/g, '"')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
+    .replace(/&#8211;/g, '-')
     .replace(/&#39;/g, "'");
 }
 
@@ -258,6 +262,150 @@ async function getFilmmoduStreams(movieUrl) {
 
   return uniqBy(streams, (stream) => `${stream.url}:${stream.title}`)
     .sort((a, b) => (b.quality || 0) - (a.quality || 0));
+}
+
+function parseSinekFilmResultPage(html, url, query) {
+  const $ = cheerio.load(html);
+  const title = cleanText(
+    $('[data-film-title]').first().text() ||
+    $('meta[property="og:title"]').attr('content') ||
+    $('h1').first().text() ||
+    $('title').text()
+  )
+    .replace(/\s+SinekFilmizle\s*$/i, '')
+    .replace(/\s+izle.*$/i, '')
+    .replace(/\s+-\s+/g, ' - ');
+
+  if (!title || !/-izle\/?$/i.test(url)) return null;
+
+  const bodyText = cleanText($('body').text());
+  return {
+    source: 'SinekFilm',
+    title: htmlDecode(title),
+    url,
+    poster: absoluteUrl($('meta[property="og:image"]').attr('content') || $('img').first().attr('src'), url),
+    imdb: parseImdb($('[data-imdb-rating]').first().text() || bodyText),
+    year: parseYearFromUrl(url) !== 'N/A' ? parseYearFromUrl(url) : parseYear($('[data-film-year]').first().text() || bodyText || title),
+    query
+  };
+}
+
+async function searchSinekFilm(query) {
+  try {
+    const { html, finalUrl } = await fetchHtml(`${SINEKFILM_BASE}/?s=${encodeURIComponent(query)}`, {
+      referer: `${SINEKFILM_BASE}/`,
+      timeout: 9000
+    });
+    const $ = cheerio.load(html);
+    const results = [];
+
+    $('a[href*="-izle"]').each((_, el) => {
+      const href = absoluteUrl($(el).attr('href'), finalUrl);
+      const card = $(el).closest('.group, article, .movie, .item, .film, li, div');
+      const title = cleanText(
+        $(el).attr('title') ||
+        $(el).find('img').attr('alt') ||
+        card.find('h1, h2, h3').first().text() ||
+        $(el).text()
+      ).replace(/\s+izle\s*$/i, '');
+      if (!href || !title || !/-izle\/?$/i.test(href)) return;
+      if (/film-izle|kategori|yorum|fragman/i.test(href)) return;
+      const containerText = cleanText(card.text());
+      results.push({
+        source: 'SinekFilm',
+        title: htmlDecode(title),
+        url: href,
+        poster: absoluteUrl($(el).find('img').attr('src') || $(el).closest('article, div').find('img').first().attr('src'), finalUrl),
+        imdb: parseImdb(containerText),
+        year: parseYearFromUrl(href) !== 'N/A' ? parseYearFromUrl(href) : parseYear(containerText || title),
+        query
+      });
+    });
+
+    return uniqBy(results, (result) => result.url).slice(0, 12);
+  } catch (error) {
+    console.error(`SinekFilm search failed for "${query}":`, error.message);
+    return [];
+  }
+}
+
+const TURK_PLAYER_CHAR_MAP = {
+  A: 'Z', B: 'Y', C: 'X', D: 'W', E: 'V', F: 'U', G: 'T', H: 'S', I: 'R', J: 'Q', K: 'P', L: 'O', M: 'N', N: 'M', O: 'L', P: 'K',
+  Z: 'A', Y: 'B', X: 'C', W: 'D', V: 'E', U: 'F', T: 'G', S: 'H', R: 'I', Q: 'J',
+  a: 'z', b: 'y', c: 'x', d: 'w', e: 'v', f: 'u', g: 't', h: 's', i: 'r', j: 'q', k: 'p', l: 'o', m: 'n', n: 'm', o: 'l', p: 'k',
+  z: 'a', y: 'b', x: 'c', w: 'd', v: 'e', u: 'f', t: 'g', s: 'h', r: 'i', q: 'j',
+  0: '5', 1: '6', 2: '7', 3: '8', 4: '9', 5: '0', 6: '1', 7: '2', 8: '3', 9: '4',
+  '+': '-', '/': '_', '-': '+', _: '/', '=': ''
+};
+const TURK_PLAYER_REVERSE_MAP = Object.fromEntries(Object.entries(TURK_PLAYER_CHAR_MAP).map(([key, value]) => [value, key]));
+
+function decryptTurkPlayerResponse(text = '') {
+  let decoded = '';
+  for (const char of String(text).trim()) decoded += TURK_PLAYER_REVERSE_MAP[char] || char;
+  const padding = decoded.length % 4;
+  if (padding > 0) decoded += '='.repeat(4 - padding);
+  return JSON.parse(Buffer.from(decoded, 'base64').toString('utf8'));
+}
+
+function getSinekPlayerUrls(html, pageUrl) {
+  const urls = [];
+  for (const match of String(html).matchAll(/loadFilmPlayer\([^,]+,\s*['"]([^'"]+)['"]/g)) {
+    urls.push(absoluteUrl(htmlDecode(match[1]), pageUrl));
+  }
+  for (const match of String(html).matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) {
+    urls.push(absoluteUrl(htmlDecode(match[1]), pageUrl));
+  }
+  return uniqBy(urls.filter((url) => /2turk\.xyz|m3u8|mp4/i.test(url)), Boolean);
+}
+
+async function resolveTurkPlayer(playerUrl, referer) {
+  const parsed = new URL(playerUrl);
+  const id = parsed.hash ? parsed.hash.slice(1) : parsed.searchParams.get('id');
+  if (!id) return [];
+
+  const response = await axios.get(`${TURK_PLAYER_BASE}/api/video-url`, {
+    timeout: 12000,
+    params: { id },
+    headers: {
+      ...DEFAULT_HEADERS,
+      Referer: referer || `${SINEKFILM_BASE}/`,
+      Accept: 'text/plain,*/*'
+    }
+  });
+  const data = typeof response.data === 'string' ? decryptTurkPlayerResponse(response.data) : response.data;
+  const masterUrl = data?.files?.masterUrl;
+  if (!masterUrl) return [];
+
+  const subtitles = Object.entries(data.files.subtitles || {})
+    .filter(([lang]) => ['tr', 'en'].includes(String(lang).toLowerCase()))
+    .map(([lang, url]) => ({
+      lang: String(lang).toLowerCase() === 'tr' ? 'tur' : 'eng',
+      url: absoluteUrl(url, TURK_PLAYER_BASE)
+    }));
+
+  return [{
+    source: 'SinekFilm',
+    title: `SinekFilm [${subtitles.some((sub) => sub.lang === 'tur') ? 'TR Altyazı' : 'HD'}]`,
+    url: makeProxyUrl(absoluteUrl(masterUrl, TURK_PLAYER_BASE), playerUrl),
+    type: subtitles.some((sub) => sub.lang === 'tur') ? 'subtitle' : 'unknown',
+    quality: 1080,
+    subtitles: subtitles.length > 0 ? subtitles : undefined
+  }];
+}
+
+async function getSinekFilmStreams(movieUrl) {
+  try {
+    const { html, finalUrl } = await fetchHtml(movieUrl, { referer: `${SINEKFILM_BASE}/`, timeout: 12000 });
+    const playerUrls = getSinekPlayerUrls(html, finalUrl);
+    const resolved = await Promise.all(playerUrls.map((url) => resolveTurkPlayer(url, finalUrl).catch((error) => {
+      console.error('SinekFilm player resolve failed:', error.message);
+      return [];
+    })));
+    return uniqBy(resolved.flat(), (stream) => stream.url);
+  } catch (error) {
+    console.error('SinekFilm streams failed:', error.message);
+    return [];
+  }
 }
 
 async function searchHdfilmcehennemi(query) {
@@ -1508,6 +1656,70 @@ async function getYouTubeMovieStreams(movieUrl) {
   return [];
 }
 
+async function searchAvsarFilm(query) {
+  try {
+    const { html, finalUrl } = await fetchHtml(`${AVSAR_BASE}/ara?search=${encodeURIComponent(query)}`, {
+      referer: `${AVSAR_BASE}/`,
+      timeout: 10000
+    });
+    const $ = cheerio.load(html);
+    const results = [];
+
+    $('a[href*="/watch/"]').each((_, el) => {
+      const href = absoluteUrl($(el).attr('href'), finalUrl);
+      const card = $(el).closest('.movie-item, .movie-card, .video-card, .item, .swiper-slide, .col, article, div');
+      const title = cleanText(
+        $(el).attr('aria-label') ||
+        $(el).attr('title') ||
+        $(el).find('img').attr('alt') ||
+        card.find('.title, h1, h2, h3, h4, h5').first().text()
+      )
+        .replace(/^İzle\s+/i, '')
+        .replace(/\s*[-|]\s*Film İzle\s*$/i, '')
+        .replace(/\s*\|\s*Film izle\s*$/i, '');
+      if (!href || !title) return;
+      const containerText = cleanText(card.text());
+      results.push({
+        source: 'AvsarFilm',
+        title,
+        url: href,
+        poster: absoluteUrl($(el).find('img').attr('src') || $(el).find('img').attr('data-src') || card.find('img').first().attr('src'), finalUrl),
+        imdb: 'N/A',
+        year: parseYear(containerText || title),
+        query
+      });
+    });
+
+    return uniqBy(results, (result) => result.url).slice(0, 12);
+  } catch (error) {
+    console.error(`AvsarFilm search failed for "${query}":`, error.message);
+    return [];
+  }
+}
+
+async function getAvsarFilmStreams(movieUrl) {
+  try {
+    const { html } = await fetchHtml(movieUrl, { referer: `${AVSAR_BASE}/`, timeout: 10000 });
+    const $ = cheerio.load(html);
+    const videoUrl = $('.video-mode-toggle-compact').attr('data-full-url') ||
+      $('[data-full-url]').first().attr('data-full-url') ||
+      html.match(/data-full-url=["']([^"']+)/)?.[1] ||
+      html.match(/https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{6,}/)?.[0];
+    const ytId = extractYouTubeId(htmlDecode(videoUrl));
+    if (!ytId) return [];
+
+    return [{
+      source: 'AvsarFilm',
+      title: 'AvsarFilm [YouTube] [Full]',
+      ytId,
+      quality: 1080
+    }];
+  } catch (error) {
+    console.error('AvsarFilm streams failed:', error.message);
+    return [];
+  }
+}
+
 async function getYouTubeEpisodeStreams(seriesUrl, season, episode) {
   try {
     const parsed = new URL(seriesUrl);
@@ -1572,6 +1784,16 @@ const providers = [
     getStreams: getFilmmoduStreams
   },
   {
+    id: 'sinekfilm',
+    name: 'SinekFilm',
+    searchTimeoutMs: 10000,
+    streamTimeoutMs: 12000,
+    fastStreamTimeoutMs: 12000,
+    supports: ['movie'],
+    searchMany: (queries) => searchQueries(queries, searchSinekFilm, 4500),
+    getStreams: getSinekFilmStreams
+  },
+  {
     id: 'hdfilmcehennemi',
     name: 'HDFilmCehennemi',
     searchTimeoutMs: 12000,
@@ -1633,6 +1855,15 @@ const providers = [
     getEpisodeStreams: getYouTubeEpisodeStreams
   },
   {
+    id: 'avsarfilm',
+    name: 'AvsarFilm',
+    searchTimeoutMs: 10000,
+    streamTimeoutMs: 10000,
+    supports: ['movie'],
+    searchMany: (queries) => searchQueries(queries, searchAvsarFilm, 5000),
+    getStreams: getAvsarFilmStreams
+  },
+  {
     id: 'webteizle',
     name: 'WebteIzle',
     searchTimeoutMs: 4000,
@@ -1647,6 +1878,9 @@ module.exports = {
   providers,
   searchFilmmodu,
   getFilmmoduStreams,
+  searchSinekFilm,
+  getSinekFilmStreams,
+  decryptTurkPlayerResponse,
   searchHdfilmcehennemi,
   getHdfilmcehennemiStreams,
   searchWebteIzle,
@@ -1665,6 +1899,8 @@ module.exports = {
   searchTvDizilerSeries,
   searchTvDizilerSeriesMany,
   getTvDizilerEpisodeStreams,
+  searchAvsarFilm,
+  getAvsarFilmStreams,
   searchYouTubeMovieMany,
   getYouTubeMovieStreams,
   searchYouTubeSeriesMany,

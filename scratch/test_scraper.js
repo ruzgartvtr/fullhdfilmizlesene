@@ -54,11 +54,13 @@ async function run() {
     addon._private.getSearchProviders([
       { name: 'HDFilmCehennemi' },
       { name: 'FullHDFilm' },
+      { name: 'SinekFilm' },
       { name: 'JetFilm' },
       { name: 'Filmmodu' },
+      { name: 'AvsarFilm' },
       { name: 'YouTube' }
     ], 'movie', { hasLocalAliases: true, hasTurkishAliases: true, queryTitle: 'The Devil Wears Prada' }).length,
-    5,
+    7,
     'Foreign-title movies with Turkish aliases should keep broad provider coverage'
   );
   assert(addon._private.getTitleAliases('tt0458352', 'The Devil Wears Prada').includes('Şeytan Marka Giyer'), 'Expected Turkish Devil Wears Prada alias');
@@ -67,11 +69,13 @@ async function run() {
     addon._private.getSearchProviders([
       { name: 'HDFilmCehennemi' },
       { name: 'FullHDFilm' },
+      { name: 'SinekFilm' },
       { name: 'JetFilm' },
       { name: 'Filmmodu' },
+      { name: 'AvsarFilm' },
       { name: 'YouTube' }
     ], 'movie', { hasLocalAliases: false, queryTitle: 'Inception' }).length,
-    5,
+    7,
     'Foreign movie fast path should keep broad provider coverage'
   );
 

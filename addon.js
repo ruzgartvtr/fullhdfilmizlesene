@@ -19,9 +19,9 @@ const FAST_RESPONSE_MODE = process.env.FAST_RESPONSE_MODE !== '0';
 const FAST_SEARCH_TIMEOUT_MS = Number(process.env.FAST_SEARCH_TIMEOUT_MS || 3500);
 const FAST_STREAM_TIMEOUT_MS = Number(process.env.FAST_STREAM_TIMEOUT_MS || 6500);
 const FAST_MAX_SEARCH_QUERIES = Number(process.env.FAST_MAX_SEARCH_QUERIES || 5);
-const FAST_MAX_SOURCES = Number(process.env.FAST_MAX_SOURCES || 5);
-const FAST_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_MOVIE_SEARCH_SOURCES || 5);
-const FAST_FOREIGN_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_FOREIGN_MOVIE_SEARCH_SOURCES || 5);
+const FAST_MAX_SOURCES = Number(process.env.FAST_MAX_SOURCES || 7);
+const FAST_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_MOVIE_SEARCH_SOURCES || 7);
+const FAST_FOREIGN_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_FOREIGN_MOVIE_SEARCH_SOURCES || 7);
 const FAST_SERIES_SEARCH_SOURCES = Number(process.env.FAST_SERIES_SEARCH_SOURCES || 2);
 function getAddonBaseUrl() {
     const value = process.env.ADDON_BASE_URL ||
@@ -81,7 +81,7 @@ const manifest = {
     id: 'community.turkish-film-sources',
     version: '2.1.0',
     name: 'Turkish Film Sources',
-    description: 'Turkish movie and series streams from FullHDFilmizlesene, JetFilm, Filmmodu, HDFilmCehennemi, DiziFilmizle, Diziyou, Ddizi, TvDiziler, YouTube and WebteIzle and more.',
+    description: 'Turkish movie and series streams from FullHDFilmizlesene, SinekFilm, AvsarFilm, JetFilm, Filmmodu, HDFilmCehennemi, DiziFilmizle, Diziyou, Ddizi, TvDiziler, YouTube and more.',
     resources: ['stream'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
@@ -126,6 +126,26 @@ function cleanTitle(title = '') {
         .replace(/ç/g, 'c')
         .replace(/\bizle\b/g, '')
         .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function foldTurkishTitle(title = '') {
+    return String(title)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/ı/g, 'i')
+        .replace(/İ/g, 'I')
+        .replace(/ğ/g, 'g')
+        .replace(/Ğ/g, 'G')
+        .replace(/ü/g, 'u')
+        .replace(/Ü/g, 'U')
+        .replace(/ş/g, 's')
+        .replace(/Ş/g, 'S')
+        .replace(/ö/g, 'o')
+        .replace(/Ö/g, 'O')
+        .replace(/ç/g, 'c')
+        .replace(/Ç/g, 'C')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -284,10 +304,12 @@ function getProviderPriority(provider, contentType) {
     const moviePriority = {
         HDFilmCehennemi: 0,
         FullHDFilm: 1,
-        JetFilm: 2,
-        Filmmodu: 3,
-        YouTube: 4,
-        WebteIzle: 5
+        SinekFilm: 2,
+        JetFilm: 3,
+        Filmmodu: 4,
+        AvsarFilm: 5,
+        YouTube: 6,
+        WebteIzle: 7
     };
     const table = contentType === 'series' ? seriesPriority : moviePriority;
     return table[provider.name] ?? 50;
@@ -383,12 +405,18 @@ function buildSearchQueries(imdbId, meta, dynamicAliases = []) {
     const titleAliases = getTitleAliases(imdbId, meta.name, dynamicAliases);
     const queries = [imdbId, meta.name, ...titleAliases];
     const metaYear = String(meta.year || meta.releaseInfo || '').match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
+    for (const title of [meta.name, ...titleAliases]) {
+        const folded = foldTurkishTitle(title);
+        if (folded && folded !== title) queries.push(folded);
+    }
     if (metaYear && meta.name && !String(meta.name).includes(metaYear)) {
         queries.push(`${meta.name} ${metaYear}`);
     }
     for (const alias of titleAliases) {
         if (metaYear && alias && !String(alias).includes(metaYear)) {
             queries.push(`${alias} ${metaYear}`);
+            const foldedAlias = foldTurkishTitle(alias);
+            if (foldedAlias && foldedAlias !== alias) queries.push(`${foldedAlias} ${metaYear}`);
         }
     }
 

@@ -17,6 +17,7 @@ const SINEKFILM_BASE = 'https://sinekfilmizle.com';
 const TURK_PLAYER_BASE = 'https://p.2turk.xyz';
 const AVSAR_BASE = 'https://www.avsarfilm.com.tr';
 const INTERNET_ARCHIVE_BASE = 'https://archive.org';
+const WIKIMEDIA_COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 
 const DEFAULT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -1955,6 +1956,164 @@ async function getInternetArchiveStreams(metadataUrl) {
   }
 }
 
+function quoteArchiveValue(value = '') {
+  return `"${String(value).replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim()}"`;
+}
+
+function normalizeArchiveTitle(title = '') {
+  return slugify(String(title)
+    .replace(/,\s*Turkish\s+Movie\b/i, '')
+    .replace(/\b(?:full\s*hd|turkce|türkçe|movie|film)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim());
+}
+
+function isTurkishArchiveTitleMatch(resultTitle = '', queryTitle = '') {
+  const result = normalizeArchiveTitle(resultTitle);
+  const query = normalizeArchiveTitle(queryTitle);
+  if (!result || !query) return false;
+  if (result === query) return true;
+  const queryWordCount = query.split('-').filter(Boolean).length;
+  if (queryWordCount <= 2) return false;
+  return result.includes(query);
+}
+
+async function searchTurkishArchive(query) {
+  if (!query || /^tt\d+$/i.test(query)) return [];
+  try {
+    const title = cleanText(query).replace(/\b(?:19|20)\d{2}\b/g, '').trim() || cleanText(query);
+    const response = await axios.get(`${INTERNET_ARCHIVE_BASE}/advancedsearch.php`, {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: { ...DEFAULT_HEADERS, Referer: `${INTERNET_ARCHIVE_BASE}/` },
+      params: {
+        q: `mediatype:movies AND title:${quoteArchiveValue(title)} AND (language:Turkish OR languageSorter:Turkish OR language:tur)`,
+        fl: ['identifier', 'title', 'description', 'year', 'date', 'language', 'downloads', 'licenseurl'],
+        rows: 12,
+        page: 1,
+        output: 'json'
+      }
+    });
+    const docs = response.data?.response?.docs || [];
+    return docs.map((item) => ({
+      source: 'TürkçeArşiv',
+      title: cleanText(item.title || item.identifier),
+      url: `${INTERNET_ARCHIVE_BASE}/metadata/${encodeURIComponent(item.identifier)}`,
+      poster: `${INTERNET_ARCHIVE_BASE}/services/img/${encodeURIComponent(item.identifier)}`,
+      imdb: 'N/A',
+      year: parseYear(item.year || item.date || item.title),
+      query,
+      language: item.language,
+      licenseurl: item.licenseurl
+    })).filter((item) => item.title && item.url && isTurkishArchiveTitleMatch(item.title, title));
+  } catch (error) {
+    console.error(`TürkçeArşiv search failed for "${query}":`, error.message);
+    return [];
+  }
+}
+
+async function getTurkishArchiveStreams(metadataUrl) {
+  const streams = await getInternetArchiveStreams(metadataUrl);
+  return streams.map((stream) => ({
+    ...stream,
+    source: 'TürkçeArşiv',
+    title: stream.title.replace(/^InternetArchive/, 'TürkçeArşiv [TR]')
+  }));
+}
+
+function getCommonsTitle(pageTitle = '') {
+  return cleanText(String(pageTitle).replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' '));
+}
+
+function getCommonsVideoUrl(info = {}) {
+  const derivatives = Array.isArray(info.derivatives) ? info.derivatives : [];
+  const playable = derivatives
+    .filter((item) => item.src && /video\/(?:webm|mp4)/i.test(item.type || ''))
+    .sort((a, b) => Number(b.width || 0) - Number(a.width || 0))[0];
+  if (playable?.src) return playable.src;
+  if (/video\/(?:webm|mp4)/i.test(info.mime || '') && info.url) return info.url;
+  return '';
+}
+
+async function searchWikimediaCommons(query) {
+  if (!query || /^tt\d+$/i.test(query)) return [];
+  try {
+    const response = await axios.get(WIKIMEDIA_COMMONS_API, {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: {
+        ...DEFAULT_HEADERS,
+        'User-Agent': 'TurkishStremioAddon/1.0',
+        Referer: 'https://commons.wikimedia.org/',
+        Accept: 'application/json,text/plain,*/*'
+      },
+      params: {
+        action: 'query',
+        generator: 'search',
+        gsrsearch: `${query} Turkey Turkish filetype:video`,
+        gsrnamespace: 6,
+        gsrlimit: 10,
+        prop: 'videoinfo',
+        viprop: 'url|mime|size|derivatives',
+        format: 'json',
+        origin: '*'
+      }
+    });
+    const pages = Object.values(response.data?.query?.pages || {});
+    return pages.map((page) => {
+      const info = page.videoinfo?.[0] || {};
+      const videoUrl = getCommonsVideoUrl(info);
+      return {
+        source: 'WikimediaCommons',
+        title: getCommonsTitle(page.title),
+        url: page.title,
+        poster: '',
+        imdb: 'N/A',
+        year: parseYear(page.title),
+        query,
+        videoUrl,
+        descriptionUrl: info.descriptionurl
+      };
+    }).filter((item) => item.title && item.videoUrl);
+  } catch (error) {
+    console.error(`WikimediaCommons search failed for "${query}":`, error.message);
+    return [];
+  }
+}
+
+async function getWikimediaCommonsStreams(pageTitle) {
+  try {
+    const response = await axios.get(WIKIMEDIA_COMMONS_API, {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: {
+        ...DEFAULT_HEADERS,
+        'User-Agent': 'TurkishStremioAddon/1.0',
+        Referer: 'https://commons.wikimedia.org/',
+        Accept: 'application/json,text/plain,*/*'
+      },
+      params: {
+        action: 'query',
+        titles: pageTitle,
+        prop: 'videoinfo',
+        viprop: 'url|mime|size|derivatives',
+        format: 'json',
+        origin: '*'
+      }
+    });
+    const page = Object.values(response.data?.query?.pages || {})[0];
+    const info = page?.videoinfo?.[0] || {};
+    const videoUrl = getCommonsVideoUrl(info);
+    if (!videoUrl) return [];
+    return [{
+      source: 'WikimediaCommons',
+      title: `WikimediaCommons [Açık Arşiv] ${getCommonsTitle(page?.title || pageTitle)}`,
+      url: videoUrl,
+      quality: Number(info.width || 0) >= 1280 ? 1080 : 720
+    }];
+  } catch (error) {
+    console.error('WikimediaCommons streams failed:', error.message);
+    return [];
+  }
+}
+
 async function getYouTubeEpisodeStreams(seriesUrl, season, episode) {
   try {
     const parsed = new URL(seriesUrl);
@@ -2118,6 +2277,26 @@ const providers = [
     getStreams: getInternetArchiveStreams
   },
   {
+    id: 'turkcearsiv',
+    name: 'TürkçeArşiv',
+    searchTimeoutMs: 9000,
+    streamTimeoutMs: 12000,
+    supports: ['movie'],
+    maxStreamMatches: 5,
+    searchMany: (queries) => searchQueries(queries, searchTurkishArchive, 4500),
+    getStreams: getTurkishArchiveStreams
+  },
+  {
+    id: 'wikimediacommons',
+    name: 'WikimediaCommons',
+    searchTimeoutMs: 9000,
+    streamTimeoutMs: 10000,
+    supports: ['movie'],
+    maxStreamMatches: 3,
+    searchMany: (queries) => searchQueries(queries, searchWikimediaCommons, 4500),
+    getStreams: getWikimediaCommonsStreams
+  },
+  {
     id: 'webteizle',
     name: 'WebteIzle',
     searchTimeoutMs: 4000,
@@ -2159,6 +2338,10 @@ module.exports = {
   getAvsarFilmStreams,
   searchInternetArchive,
   getInternetArchiveStreams,
+  searchTurkishArchive,
+  getTurkishArchiveStreams,
+  searchWikimediaCommons,
+  getWikimediaCommonsStreams,
   searchYouTubeMovieMany,
   getYouTubeMovieStreams,
   searchYouTubeSeriesMany,

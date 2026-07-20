@@ -47,28 +47,31 @@ async function run() {
   );
   assert.strictEqual(
     addon._private.getSearchProviders([{ name: 'HDFilmCehennemi' }, { name: 'FullHDFilm' }], 'movie', { hasLocalAliases: true, queryTitle: 'GORA' }).length,
-    1,
-    'Local movie fast path should search the top provider first'
+    2,
+    'Local movie fast path should keep available working providers in scope'
   );
   assert.strictEqual(
     addon._private.getSearchProviders([
       { name: 'HDFilmCehennemi' },
       { name: 'FullHDFilm' },
       { name: 'JetFilm' },
-      { name: 'Filmmodu' }
+      { name: 'Filmmodu' },
+      { name: 'YouTube' }
     ], 'movie', { hasLocalAliases: true, hasTurkishAliases: true, queryTitle: 'The Devil Wears Prada' }).length,
-    4,
+    5,
     'Foreign-title movies with Turkish aliases should keep broad provider coverage'
   );
   assert(addon._private.getTitleAliases('tt0458352', 'The Devil Wears Prada').includes('Şeytan Marka Giyer'), 'Expected Turkish Devil Wears Prada alias');
+  assert(addon._private.getTitleAliases('tt33612209', 'The Devil Wears Prada 2').includes('Şeytan Marka Giyer 2'), 'Expected Turkish Devil Wears Prada 2 alias');
   assert.strictEqual(
     addon._private.getSearchProviders([
       { name: 'HDFilmCehennemi' },
       { name: 'FullHDFilm' },
       { name: 'JetFilm' },
-      { name: 'Filmmodu' }
+      { name: 'Filmmodu' },
+      { name: 'YouTube' }
     ], 'movie', { hasLocalAliases: false, queryTitle: 'Inception' }).length,
-    4,
+    5,
     'Foreign movie fast path should keep broad provider coverage'
   );
 

@@ -339,9 +339,9 @@ async function probeHdfilmcehennemiMovieSlugs(query, maxCandidates = 5) {
   if (slug.length < 3) return [];
 
   const candidates = [
+    `${slug}-izle`,
     `${slug}-izle-2`,
     `${slug}-izle-1`,
-    `${slug}-izle`,
     `${slug}-hd-izle`,
     `${slug}-full-izle`
   ];
@@ -1396,6 +1396,27 @@ function hasTurkishSeriesSignal(queries, title) {
   return /\b(gonul|dagi|kizil|kizilcik|goncalar|serbeti|esref|ruya|guller|gunahlar|yali|capkini|sen|cal|kapimi)\b/i.test(text);
 }
 
+function parseYearFromQueries(queries) {
+  return queries.map(parseYear).find((year) => year !== 'N/A') || 'N/A';
+}
+
+async function searchYouTubeMovieMany(queries) {
+  const title = getYouTubeProviderTitle(queries);
+  if (!title) return [];
+  const titles = queries
+    .map((query) => cleanText(query))
+    .filter((query) => query && !/^tt\d+$/i.test(query));
+  return [{
+    source: 'YouTube',
+    title,
+    url: `${YOUTUBE_BASE}/results?movie=${encodeURIComponent(title)}&year=${encodeURIComponent(parseYearFromQueries(queries))}&titles=${encodeURIComponent(titles.join('||'))}`,
+    poster: '',
+    imdb: 'N/A',
+    year: parseYearFromQueries(queries),
+    query: title
+  }];
+}
+
 async function searchYouTubeSeriesMany(queries) {
   const title = getYouTubeProviderTitle(queries);
   if (!hasTurkishSeriesSignal(queries, title)) return [];
@@ -1432,6 +1453,59 @@ function isYouTubeEpisodeMatch(itemTitle, seriesTitle, episode) {
   const text = cleanText(itemTitle);
   const episodeRegex = new RegExp(`\\b${episode}\\s*\\.?\\s*b[oö]l[uü]m\\b`, 'i');
   return episodeRegex.test(text) || new RegExp(`\\b${episode}\\s*\\.\\s*bolum\\b`, 'i').test(slugify(text).replace(/-/g, ' '));
+}
+
+function isYouTubeMovieMatch(itemTitle, movieTitles, year) {
+  const cleanItem = slugify(itemTitle);
+  const titles = Array.isArray(movieTitles) ? movieTitles : [movieTitles];
+  if (!titles.some((title) => {
+    const cleanMovie = slugify(title);
+    return cleanMovie && cleanItem.includes(cleanMovie);
+  })) return false;
+  if (/review|reaction|explained|ending|interview|behind the scenes|soundtrack|clip|scene|recap|analysis|yorum|inceleme|kamera arkasi|fan\s*made|concept|first trailer/i.test(itemTitle)) return false;
+  if (year !== 'N/A' && /\b(?:19|20)\d{2}\b/.test(itemTitle) && !itemTitle.includes(year)) return false;
+  return /official|fragman|teaser|tv spot|20th century|disney|movieclips/i.test(itemTitle);
+}
+
+async function getYouTubeMovieStreams(movieUrl) {
+  try {
+    const parsed = new URL(movieUrl);
+    const movieTitle = parsed.searchParams.get('movie') || '';
+    const year = parsed.searchParams.get('year') || 'N/A';
+    const movieTitles = [
+      movieTitle,
+      ...(parsed.searchParams.get('titles') || '').split('||')
+    ].map(cleanText).filter(Boolean);
+    if (!movieTitle) return [];
+
+    const queries = uniqBy(movieTitles.flatMap((title) => [
+      `${title} ${year !== 'N/A' ? year : ''} official trailer`,
+      `${title} official trailer`,
+      `${title} fragman`,
+      `${title} teaser`
+    ]), Boolean);
+
+    for (const query of queries) {
+      const { html } = await fetchHtml(`${YOUTUBE_BASE}/results?search_query=${encodeURIComponent(query.replace(/\s+/g, ' ').trim())}`, {
+        referer: YOUTUBE_BASE,
+        timeout: 15000,
+        headers: { Accept: 'text/html,*/*' }
+      });
+      const match = parseYouTubeSearchResults(html).find((item) => isYouTubeMovieMatch(item.title, movieTitles, year));
+      if (match) {
+        return [{
+          source: 'YouTube',
+          title: `YouTube [Trailer] ${match.title}`,
+          ytId: match.ytId,
+          quality: 1080
+        }];
+      }
+    }
+  } catch (error) {
+    console.error('YouTube movie streams failed:', error.message);
+  }
+
+  return [];
 }
 
 async function getYouTubeEpisodeStreams(seriesUrl, season, episode) {
@@ -1501,9 +1575,9 @@ const providers = [
     id: 'hdfilmcehennemi',
     name: 'HDFilmCehennemi',
     searchTimeoutMs: 12000,
-    fastSearchTimeoutMs: 6500,
+    fastSearchTimeoutMs: 10000,
     streamTimeoutMs: 18000,
-    fastStreamTimeoutMs: 6500,
+    fastStreamTimeoutMs: 12000,
     supports: ['movie', 'series'],
     searchMany: searchHdfilmcehennemiMany,
     getStreams: getHdfilmcehennemiStreams,
@@ -1551,7 +1625,10 @@ const providers = [
     name: 'YouTube',
     searchTimeoutMs: 3000,
     streamTimeoutMs: 15000,
-    supports: ['series'],
+    fastStreamTimeoutMs: 7000,
+    supports: ['movie', 'series'],
+    searchMany: searchYouTubeMovieMany,
+    getStreams: getYouTubeMovieStreams,
     searchSeriesMany: searchYouTubeSeriesMany,
     getEpisodeStreams: getYouTubeEpisodeStreams
   },
@@ -1588,6 +1665,8 @@ module.exports = {
   searchTvDizilerSeries,
   searchTvDizilerSeriesMany,
   getTvDizilerEpisodeStreams,
+  searchYouTubeMovieMany,
+  getYouTubeMovieStreams,
   searchYouTubeSeriesMany,
   getYouTubeEpisodeStreams,
   uniqBy

@@ -11,6 +11,7 @@ const META_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 15 * 60 * 1000;
 const STREAM_CACHE_TTL_MS = 4 * 60 * 1000;
 const ALIAS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const FAST_META_TIMEOUT_MS = Number(process.env.FAST_META_TIMEOUT_MS || 8000);
 const WIKIDATA_SPARQL_URL = 'https://query.wikidata.org/sparql';
 const YOUTUBE_STREAM_MODE = String(process.env.YOUTUBE_STREAM_MODE || 'on').toLowerCase();
 const YOUTUBE_FALLBACK_ONLY = process.env.YOUTUBE_FALLBACK_ONLY === '1';
@@ -18,9 +19,9 @@ const FAST_RESPONSE_MODE = process.env.FAST_RESPONSE_MODE !== '0';
 const FAST_SEARCH_TIMEOUT_MS = Number(process.env.FAST_SEARCH_TIMEOUT_MS || 3500);
 const FAST_STREAM_TIMEOUT_MS = Number(process.env.FAST_STREAM_TIMEOUT_MS || 6500);
 const FAST_MAX_SEARCH_QUERIES = Number(process.env.FAST_MAX_SEARCH_QUERIES || 5);
-const FAST_MAX_SOURCES = Number(process.env.FAST_MAX_SOURCES || 3);
-const FAST_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_MOVIE_SEARCH_SOURCES || 1);
-const FAST_FOREIGN_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_FOREIGN_MOVIE_SEARCH_SOURCES || 4);
+const FAST_MAX_SOURCES = Number(process.env.FAST_MAX_SOURCES || 5);
+const FAST_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_MOVIE_SEARCH_SOURCES || 5);
+const FAST_FOREIGN_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_FOREIGN_MOVIE_SEARCH_SOURCES || 5);
 const FAST_SERIES_SEARCH_SOURCES = Number(process.env.FAST_SERIES_SEARCH_SOURCES || 2);
 function getAddonBaseUrl() {
     const value = process.env.ADDON_BASE_URL ||
@@ -36,6 +37,7 @@ const TITLE_ALIASES = {
     tt19396786: ['Atatürk 2 1881 1919', 'Atatürk II 1881 1919', 'Ataturk 2 1881 1919', 'Ataturk II 1881 1919', 'Atatürk 2', 'Ataturk 2'],
     tt0384116: ['GORA 2004', 'GORA', 'G O R A'],
     tt0458352: ['Şeytan Marka Giyer', 'Seytan Marka Giyer', 'The Devil Wears Prada 2006', 'Devil Wears Prada'],
+    tt33612209: ['Şeytan Marka Giyer 2', 'Seytan Marka Giyer 2', 'The Devil Wears Prada 2 2026', 'Devil Wears Prada 2'],
     tt12872884: ['Gönül Dağı', 'Gonul Dagi'],
     tt21764074: ['Kızılcık Şerbeti', 'Kizilcik Serbeti'],
     tt35069642: ['Eşref Rüya', 'Esref Ruya'],
@@ -45,6 +47,19 @@ const TITLE_ALIASES = {
     tt12439466: ['Sen Çal Kapımı', 'Sen Cal Kapimi'],
     tt1848220: ['Muhteşem Yüzyıl', 'Muhtesem Yuzyil'],
     tt0441924: ['Gümüş', 'Gumus']
+};
+const TITLE_TRAILERS = {
+    tt33612209: ['PMd1at7OwiE', 'e9HXmMnUEdE']
+};
+const DIRECT_PROVIDER_MATCHES = {
+    tt33612209: [{
+        source: 'HDFilmCehennemi',
+        title: 'Şeytan Marka Giyer 2 - The Devil Wears Prada 2',
+        url: 'https://www.hdfilmcehennemi.now/film/seytan-marka-giyer-2-2026-izle/',
+        year: '2026',
+        imdb: 'N/A',
+        query: 'tt33612209'
+    }]
 };
 const NAME_ALIASES = {
     'an anatolian tale': ['Gönül Dağı', 'Gonul Dagi'],
@@ -57,7 +72,9 @@ const NAME_ALIASES = {
     'the magnificent century': ['Muhteşem Yüzyıl', 'Muhtesem Yuzyil'],
     'gumus': ['Gümüş', 'Gumus'],
     'the devil wears prada': ['Şeytan Marka Giyer', 'Seytan Marka Giyer'],
-    'devil wears prada': ['Şeytan Marka Giyer', 'Seytan Marka Giyer']
+    'devil wears prada': ['Şeytan Marka Giyer', 'Seytan Marka Giyer'],
+    'the devil wears prada 2': ['Şeytan Marka Giyer 2', 'Seytan Marka Giyer 2'],
+    'devil wears prada 2': ['Şeytan Marka Giyer 2', 'Seytan Marka Giyer 2']
 };
 
 const manifest = {
@@ -80,7 +97,7 @@ async function getMetaFromImdb(type, imdbId) {
     return memoizeAsync(`meta:${type}:${imdbId}`, META_CACHE_TTL_MS, async() => {
         const url = `${CINEMETA_URL}/${type}/${imdbId}.json`;
         const attempts = FAST_RESPONSE_MODE ? 1 : 2;
-        const timeout = FAST_RESPONSE_MODE ? 4000 : 15000;
+        const timeout = FAST_RESPONSE_MODE ? FAST_META_TIMEOUT_MS : 15000;
         for (let attempt = 1; attempt <= attempts; attempt++) {
             try {
                 const response = await axios.get(url, { timeout });
@@ -250,6 +267,10 @@ function describeMatches(matches) {
     return matches.map((match) => `[${match.source}] "${match.title}"`).join(', ');
 }
 
+function getDirectProviderMatches(imdbId) {
+    return DIRECT_PROVIDER_MATCHES[imdbId] || [];
+}
+
 function getProviderPriority(provider, contentType) {
     const seriesPriority = {
         YouTube: 0,
@@ -265,7 +286,8 @@ function getProviderPriority(provider, contentType) {
         FullHDFilm: 1,
         JetFilm: 2,
         Filmmodu: 3,
-        WebteIzle: 4
+        YouTube: 4,
+        WebteIzle: 5
     };
     const table = contentType === 'series' ? seriesPriority : moviePriority;
     return table[provider.name] ?? 50;
@@ -348,26 +370,26 @@ async function scrapeRankedMatches(rankedMatchesBySource, activeProviders, conte
 
     const fastEntries = sourceEntries.slice(0, FAST_MAX_SOURCES);
     const allEntries = fastEntries.length > 0 ? fastEntries : sourceEntries;
-    const attempts = allEntries.map((entry) =>
+    const settled = await Promise.allSettled(allEntries.map((entry) =>
         scrapeProviderMatches(entry.provider, entry.matches.slice(0, 2), contentType, season, episode)
-        .then((streams) => {
-            if (streams.length === 0) throw new Error(`${entry.source} returned no playable streams`);
-            return streams;
-        })
-    );
+    ));
 
-    try {
-        return [await Promise.any(attempts)];
-    } catch (error) {
-        return [];
-    }
+    return settled
+        .filter((result) => result.status === 'fulfilled' && result.value.length > 0)
+        .map((result) => result.value);
 }
 
 function buildSearchQueries(imdbId, meta, dynamicAliases = []) {
-    const queries = [imdbId, meta.name, ...getTitleAliases(imdbId, meta.name, dynamicAliases)];
+    const titleAliases = getTitleAliases(imdbId, meta.name, dynamicAliases);
+    const queries = [imdbId, meta.name, ...titleAliases];
     const metaYear = String(meta.year || meta.releaseInfo || '').match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
     if (metaYear && meta.name && !String(meta.name).includes(metaYear)) {
         queries.push(`${meta.name} ${metaYear}`);
+    }
+    for (const alias of titleAliases) {
+        if (metaYear && alias && !String(alias).includes(metaYear)) {
+            queries.push(`${alias} ${metaYear}`);
+        }
     }
 
     const punctuationFreeTitle = String(meta.name || '')
@@ -462,9 +484,10 @@ LIMIT 40`;
 async function getFallbackMetaFromAliases(imdbId, type) {
     const staticAliases = getStaticTitleAliases(imdbId, '');
     const dynamicAliases = await getWikidataTitleAliases(imdbId, '');
-    let name = staticAliases[0] || dynamicAliases[0];
+    const aliases = [...staticAliases, ...dynamicAliases];
+    let name = aliases[0];
     if (!name) return null;
-    const years = String(name).match(/\b(?:19|20)\d{2}\b/g) || [];
+    const years = aliases.flatMap((alias) => String(alias).match(/\b(?:19|20)\d{2}\b/g) || []);
     const year = years.length > 0 ? years[years.length - 1] : '';
     if (year) {
         name = name.replace(new RegExp(`\\s+${year}\\s*$`), '').trim();
@@ -517,6 +540,23 @@ function applyStreamPreferences(streams) {
         return directStreams;
     }
     return playable;
+}
+
+function getMetaTrailerStreams(meta, imdbId) {
+    if (!isYouTubeProviderEnabled()) return [];
+    return [
+            ...(meta?.trailers || []).map((trailer) => trailer?.source),
+            ...(TITLE_TRAILERS[imdbId] || [])
+        ]
+        .filter(Boolean)
+        .filter((source, index, sources) => sources.indexOf(source) === index)
+        .slice(0, 2)
+        .map((source) => ({
+            source: 'YouTube',
+            title: `YouTube [Trailer] ${meta.name}`,
+            ytId: source,
+            quality: 1080
+        }));
 }
 
 builder.defineStreamHandler(async(args) => {
@@ -595,14 +635,20 @@ builder.defineStreamHandler(async(args) => {
         return { provider, results };
     };
     const providerSearches = await Promise.all(searchProviders.map(searchProvider));
-    let searchResults = providerSearches.flatMap(({ results }) => results);
+    let searchResults = [
+        ...providerSearches.flatMap(({ results }) => results),
+        ...getDirectProviderMatches(imdbId)
+    ];
 
     if (searchResults.length === 0 && searchProviders.length < activeProviders.length) {
         const searchedProviderIds = new Set(searchProviders.map((provider) => provider.id));
         const fallbackProviders = activeProviders.filter((provider) => !searchedProviderIds.has(provider.id));
         console.log(`No fast results for "${queryTitle}". Trying ${fallbackProviders.length} fallback providers.`);
         const fallbackSearches = await Promise.all(fallbackProviders.map(searchProvider));
-        searchResults = fallbackSearches.flatMap(({ results }) => results);
+        searchResults = [
+            ...fallbackSearches.flatMap(({ results }) => results),
+            ...getDirectProviderMatches(imdbId)
+        ];
     }
 
     if (searchResults.length === 0) {
@@ -629,7 +675,10 @@ builder.defineStreamHandler(async(args) => {
     // 4. Scrape stream URLs from ranked providers. Fast mode returns as soon as a playable source is found.
     const scrapedBySource = await scrapeRankedMatches(rankedMatchesBySource, activeProviders, contentType, season, episode);
 
-    const streams = applyStreamPreferences(uniqBy(scrapedBySource.flat(), (s) => s.url || s.ytId))
+    const streams = applyStreamPreferences(uniqBy([
+            ...scrapedBySource.flat(),
+            ...getMetaTrailerStreams(meta, imdbId)
+        ], (s) => s.url || s.ytId))
         .map((s) => {
             // Stremio can play direct video and HLS URLs. Unresolved embed pages are skipped.
             return {

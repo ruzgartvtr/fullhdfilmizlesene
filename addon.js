@@ -172,7 +172,7 @@ function findBestMatch(searchResults, queryTitle, queryYear, options = {}) {
             if (candidate.titleScore >= 85) return true;
             return candidate.imdbQueryMatches && (candidate.ratingMatches || candidate.titleScore > 0);
         })
-        .sort((a, b) => b.score - a.score)[0] ? .result || null;
+        .sort((a, b) => b.score - a.score)[0]?.result || null;
 }
 
 function scoreMatch(result, queryTitle, queryYear, options = {}) {
@@ -260,7 +260,7 @@ function getProviderPriority(provider, contentType) {
         WebteIzle: 4
     };
     const table = contentType === 'series' ? seriesPriority : moviePriority;
-    return table[provider.name] ? ? 50;
+    return table[provider.name] ?? 50;
 }
 
 function sortProvidersForSpeed(providersToSort, contentType) {
@@ -357,7 +357,7 @@ async function scrapeRankedMatches(rankedMatchesBySource, activeProviders, conte
 
 function buildSearchQueries(imdbId, meta, dynamicAliases = []) {
     const queries = [imdbId, meta.name, ...getTitleAliases(imdbId, meta.name, dynamicAliases)];
-    const metaYear = String(meta.year || meta.releaseInfo || '').match(/\b(?:19|20)\d{2}\b/) ? .[0] || '';
+    const metaYear = String(meta.year || meta.releaseInfo || '').match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
     if (metaYear && meta.name && !String(meta.name).includes(metaYear)) {
         queries.push(`${meta.name} ${metaYear}`);
     }
@@ -435,11 +435,11 @@ LIMIT 40`;
             });
 
             const aliases = [];
-            for (const row of response.data ? .results ? .bindings || []) {
+            for (const row of response.data?.results?.bindings || []) {
                 aliases.push(
-                    row.trLabel ? .value,
-                    row.trAlt ? .value,
-                    row.trWikiTitle ? .value
+                    row.trLabel?.value,
+                    row.trAlt?.value,
+                    row.trWikiTitle?.value
                 );
             }
 
@@ -635,8 +635,8 @@ builder.defineStreamHandler(async(args) => {
         .sort((a, b) => {
             const langDiff = getLanguagePriority(b.title) - getLanguagePriority(a.title);
             if (langDiff !== 0) return langDiff;
-            const aq = Number(String(a.title).match(/\[(\d{3,4})p\]/) ? .[1] || 0);
-            const bq = Number(String(b.title).match(/\[(\d{3,4})p\]/) ? .[1] || 0);
+            const aq = Number(String(a.title).match(/\[(\d{3,4})p\]/)?.[1] || 0);
+            const bq = Number(String(b.title).match(/\[(\d{3,4})p\]/)?.[1] || 0);
             return bq - aq;
         });
 

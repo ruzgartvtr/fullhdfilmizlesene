@@ -82,7 +82,7 @@ const manifest = {
     id: 'community.turkish-film-sources',
     version: '2.1.0',
     name: 'Turkish Film Sources',
-    description: 'Hızlandırılmış Türkçe film ve dizi kaynakları. Çalışan kaynaklar: HDFilmCehennemi, FullHDFilm, SinekFilm, Filmmodu, JetFilm, AvsarFilm, DiziFilmizle, Diziyou, Ddizi, TvDiziler ve YouTube fallback.',
+    description: 'Hızlandırılmış Türkçe film ve dizi kaynakları. Çalışan kaynaklar: HDFilmCehennemi, FullHDFilm, SinekFilm, Filmmodu, JetFilm, AvsarFilm, InternetArchive, DiziFilmizle, Diziyou, Ddizi, TvDiziler ve YouTube fallback.',
     resources: ['stream'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
@@ -309,8 +309,9 @@ function getProviderPriority(provider, contentType) {
         JetFilm: 3,
         Filmmodu: 4,
         AvsarFilm: 5,
-        YouTube: 6,
-        WebteIzle: 7
+        InternetArchive: 6,
+        YouTube: 7,
+        WebteIzle: 8
     };
     const table = contentType === 'series' ? seriesPriority : moviePriority;
     return table[provider.name] ?? 50;
@@ -394,7 +395,7 @@ async function scrapeRankedMatches(rankedMatchesBySource, activeProviders, conte
     const fastEntries = sourceEntries.slice(0, FAST_MAX_SOURCES);
     const allEntries = fastEntries.length > 0 ? fastEntries : sourceEntries;
     const settled = await Promise.allSettled(allEntries.map((entry) =>
-        scrapeProviderMatches(entry.provider, entry.matches.slice(0, 2), contentType, season, episode)
+        scrapeProviderMatches(entry.provider, entry.matches.slice(0, entry.provider.maxStreamMatches || 2), contentType, season, episode)
     ));
 
     return settled

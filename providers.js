@@ -15,6 +15,7 @@ const YOUTUBE_BASE = 'https://www.youtube.com';
 const SINEKFILM_BASE = 'https://sinekfilmizle.com';
 const TURK_PLAYER_BASE = 'https://p.2turk.xyz';
 const AVSAR_BASE = 'https://www.avsarfilm.com.tr';
+const INTERNET_ARCHIVE_BASE = 'https://archive.org';
 
 const DEFAULT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -1720,6 +1721,69 @@ async function getAvsarFilmStreams(movieUrl) {
   }
 }
 
+async function searchInternetArchive(query) {
+  if (!query || /^tt\d+$/i.test(query) || /^series\//i.test(query)) return [];
+  try {
+    const cleanQuery = cleanText(query).replace(/\b(?:19|20)\d{2}\b/g, '').trim();
+    if (cleanQuery.length < 3) return [];
+    const response = await axios.get(`${INTERNET_ARCHIVE_BASE}/advancedsearch.php`, {
+      timeout: 9000,
+      params: {
+        q: `title:"${cleanQuery.replace(/"/g, '')}" AND mediatype:movies`,
+        fl: ['identifier', 'title', 'year'],
+        rows: 8,
+        output: 'json'
+      },
+      headers: DEFAULT_HEADERS
+    });
+
+    return (response.data?.response?.docs || []).map((item) => ({
+      source: 'InternetArchive',
+      title: cleanText(item.title),
+      url: `${INTERNET_ARCHIVE_BASE}/metadata/${encodeURIComponent(item.identifier)}`,
+      poster: `${INTERNET_ARCHIVE_BASE}/services/img/${encodeURIComponent(item.identifier)}`,
+      imdb: 'N/A',
+      year: item.year ? String(item.year) : parseYear(item.title),
+      query
+    })).filter((item) => item.title && item.url);
+  } catch (error) {
+    console.error(`InternetArchive search failed for "${query}":`, error.message);
+    return [];
+  }
+}
+
+async function getInternetArchiveStreams(metadataUrl) {
+  try {
+    const identifier = decodeURIComponent(new URL(metadataUrl).pathname.split('/').filter(Boolean).pop() || '');
+    if (!identifier) return [];
+    const response = await axios.get(`${INTERNET_ARCHIVE_BASE}/metadata/${encodeURIComponent(identifier)}`, {
+      timeout: 12000,
+      headers: DEFAULT_HEADERS
+    });
+    const files = response.data?.files || [];
+    const mp4Files = files
+      .filter((file) => /\.mp4$/i.test(file.name || '') && !/sample|trailer|thumb|preview/i.test(file.name || ''))
+      .map((file) => ({
+        file,
+        size: Number(file.size || 0)
+      }))
+      .filter((entry) => entry.size === 0 || entry.size > 20 * 1024 * 1024)
+      .sort((a, b) => (b.size || 0) - (a.size || 0))
+      .slice(0, 2);
+
+    return mp4Files.map(({ file }) => ({
+      source: 'InternetArchive',
+      title: `InternetArchive [MP4]${file.format ? ` [${file.format}]` : ''}`,
+      url: `${INTERNET_ARCHIVE_BASE}/download/${encodeURIComponent(identifier)}/${file.name.split('/').map(encodeURIComponent).join('/')}`,
+      type: 'archive',
+      quality: /720|1080|h\.?264/i.test(`${file.name} ${file.format}`) ? 720 : 480
+    }));
+  } catch (error) {
+    console.error('InternetArchive streams failed:', error.message);
+    return [];
+  }
+}
+
 async function getYouTubeEpisodeStreams(seriesUrl, season, episode) {
   try {
     const parsed = new URL(seriesUrl);
@@ -1864,6 +1928,16 @@ const providers = [
     getStreams: getAvsarFilmStreams
   },
   {
+    id: 'internetarchive',
+    name: 'InternetArchive',
+    searchTimeoutMs: 9000,
+    streamTimeoutMs: 12000,
+    supports: ['movie'],
+    maxStreamMatches: 5,
+    searchMany: (queries) => searchQueries(queries, searchInternetArchive, 4500),
+    getStreams: getInternetArchiveStreams
+  },
+  {
     id: 'webteizle',
     name: 'WebteIzle',
     searchTimeoutMs: 4000,
@@ -1901,6 +1975,8 @@ module.exports = {
   getTvDizilerEpisodeStreams,
   searchAvsarFilm,
   getAvsarFilmStreams,
+  searchInternetArchive,
+  getInternetArchiveStreams,
   searchYouTubeMovieMany,
   getYouTubeMovieStreams,
   searchYouTubeSeriesMany,

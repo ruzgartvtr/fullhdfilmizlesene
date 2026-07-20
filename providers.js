@@ -11,6 +11,7 @@ const DIZIYOU_BASE = 'https://www.diziyou.one';
 const DIZIFILMIZLE_BASE = 'https://dizifilmizle.to';
 const DDIZI_BASE = 'https://www.ddizi.im';
 const TVDIZILER_BASE = 'https://tvdiziler.tv';
+const DIZIBOX_BASE = 'https://dizibox.now';
 const YOUTUBE_BASE = 'https://www.youtube.com';
 const SINEKFILM_BASE = 'https://sinekfilmizle.com';
 const TURK_PLAYER_BASE = 'https://p.2turk.xyz';
@@ -1386,6 +1387,176 @@ async function getDdiziEpisodeStreams(seriesUrl, season, episode) {
   }
 }
 
+function parseDiziboxEpisodeTitle(title = '') {
+  const cleaned = htmlDecode(cleanText(title));
+  const match = cleaned.match(/^(.+?)\s+(\d+)\s*\.?\s*Sezon\s+(\d+)\s*\.?\s*B[öo]l[üu]m/i);
+  if (!match) return null;
+  return {
+    title: cleanText(match[1]),
+    season: Number(match[2]),
+    episode: Number(match[3])
+  };
+}
+
+async function searchDiziboxSeries(query) {
+  if (!query || /^tt\d+$/i.test(query)) return [];
+  try {
+    const response = await axios.get(`${DIZIBOX_BASE}/wp-json/wp/v2/search`, {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: { ...DEFAULT_HEADERS, Referer: `${DIZIBOX_BASE}/`, Accept: 'application/json,text/plain,*/*' },
+      params: {
+        search: query,
+        subtype: 'post',
+        per_page: 20
+      }
+    });
+
+    const normalizedQuery = slugify(query);
+    const results = (Array.isArray(response.data) ? response.data : [])
+      .map((item) => parseDiziboxEpisodeTitle(item.title || ''))
+      .filter((item) => item?.title)
+      .filter((item) => {
+        const normalizedTitle = slugify(item.title);
+        return normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle);
+      })
+      .map((item) => ({
+        source: 'Dizibox',
+        title: item.title,
+        url: `${DIZIBOX_BASE}/?diziboxTitle=${encodeURIComponent(item.title)}`,
+        poster: '',
+        imdb: 'N/A',
+        year: 'N/A',
+        query
+      }));
+
+    return uniqBy(results, (result) => result.url).slice(0, 8);
+  } catch (error) {
+    console.error(`Dizibox series search failed for "${query}":`, error.message);
+    return [];
+  }
+}
+
+function getDiziboxTitleFromUrl(seriesUrl = '') {
+  try {
+    return cleanText(new URL(seriesUrl).searchParams.get('diziboxTitle') || '');
+  } catch (error) {
+    return '';
+  }
+}
+
+async function findDiziboxEpisodePost(title, season, episode) {
+  const queries = [
+    `${title} ${season}. Sezon ${episode}. Bölüm`,
+    `${title} ${season} Sezon ${episode} Bölüm`,
+    `${title} ${season} sezon ${episode} bolum`
+  ];
+
+  for (const query of queries) {
+    try {
+      const response = await axios.get(`${DIZIBOX_BASE}/wp-json/wp/v2/search`, {
+        timeout: REQUEST_TIMEOUT_MS,
+        headers: { ...DEFAULT_HEADERS, Referer: `${DIZIBOX_BASE}/`, Accept: 'application/json,text/plain,*/*' },
+        params: {
+          search: query,
+          subtype: 'post',
+          per_page: 10
+        }
+      });
+
+      const match = (Array.isArray(response.data) ? response.data : []).find((item) => {
+        const parsed = parseDiziboxEpisodeTitle(item.title || '');
+        if (!parsed) return false;
+        return parsed.season === Number(season) &&
+          parsed.episode === Number(episode) &&
+          slugify(parsed.title) === slugify(title);
+      });
+      if (match?.id) return match;
+    } catch (error) {
+      console.error(`Dizibox episode search failed for "${query}":`, error.message);
+    }
+  }
+
+  return null;
+}
+
+function parseDiziboxTracks(text = '', baseUrl = DIZIBOX_BASE) {
+  const match = String(text).match(/var\s+TRACKS\s*=\s*(\[[\s\S]*?\]);/);
+  if (!match) return [];
+  try {
+    return JSON.parse(match[1]).filter((track) => track.file).map((track) => ({
+      lang: track.srclang || track.label || 'tur',
+      url: absoluteUrl(track.file, baseUrl)
+    }));
+  } catch (error) {
+    return [];
+  }
+}
+
+async function resolveDiziboxKatrePlayer(embedUrl, episodeUrl, season, episode) {
+  try {
+    const { html, finalUrl } = await fetchHtml(embedUrl, {
+      referer: episodeUrl,
+      timeout: EMBED_TIMEOUT_MS,
+      headers: { Accept: 'text/html,*/*' }
+    });
+    const source = html.match(/var\s+SOURCE\s*=\s*["']([^"']+)["']/)?.[1];
+    if (!source) return [];
+    return [{
+      source: 'Dizibox',
+      title: `Dizibox [TR Altyazı] [S${season}E${episode}] [Katre]`,
+      url: makeProxyUrl(absoluteUrl(source, finalUrl), finalUrl),
+      quality: 1080,
+      subtitles: parseDiziboxTracks(html, finalUrl)
+    }];
+  } catch (error) {
+    console.error('Dizibox Katre resolve failed:', error.message);
+    return [];
+  }
+}
+
+async function getDiziboxEpisodeStreams(seriesUrl, season, episode) {
+  const title = getDiziboxTitleFromUrl(seriesUrl);
+  if (!title) return [];
+
+  try {
+    const post = await findDiziboxEpisodePost(title, season, episode);
+    if (!post?.id) return [];
+
+    const postResponse = await axios.get(`${DIZIBOX_BASE}/wp-json/wp/v2/posts/${encodeURIComponent(post.id)}`, {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: { ...DEFAULT_HEADERS, Referer: `${DIZIBOX_BASE}/`, Accept: 'application/json,text/plain,*/*' }
+    });
+    const episodeUrl = postResponse.data?.link || post.url || `${DIZIBOX_BASE}/`;
+    const content = postResponse.data?.content?.rendered || '';
+    const $ = cheerio.load(content);
+    const embeds = [];
+    $('iframe[src]').each((_, el) => embeds.push(absoluteUrl($(el).attr('src'), episodeUrl)));
+    extractUrlsFromText(content)
+      .filter((url) => /ksdpictures|embed|player|m3u8/i.test(url))
+      .forEach((url) => embeds.push(absoluteUrl(url, episodeUrl)));
+
+    const streams = [];
+    for (const embedUrl of uniqBy(embeds, Boolean).slice(0, 3)) {
+      if (/\.m3u8(?:[?#]|$)/i.test(embedUrl)) {
+        streams.push({
+          source: 'Dizibox',
+          title: `Dizibox [TR Altyazı] [S${season}E${episode}] [HLS]`,
+          url: makeProxyUrl(embedUrl, episodeUrl),
+          quality: 1080
+        });
+      } else if (/ksdpictures|katre|embed|player/i.test(embedUrl)) {
+        streams.push(...await resolveDiziboxKatrePlayer(embedUrl, episodeUrl, season, episode));
+      }
+      if (streams.length) break;
+    }
+
+    return uniqBy(streams, (stream) => stream.url);
+  } catch (error) {
+    console.error('Dizibox episode streams failed:', error.message);
+    return [];
+  }
+}
+
 async function searchTvDizilerSeries(query) {
   if (!query || /^tt\d+$/i.test(query) || /^series\//i.test(query)) return [];
   const normalized = slugify(query);
@@ -1898,6 +2069,15 @@ const providers = [
     getEpisodeStreams: getDdiziEpisodeStreams
   },
   {
+    id: 'dizibox',
+    name: 'Dizibox',
+    searchTimeoutMs: 10000,
+    streamTimeoutMs: 12000,
+    supports: ['series'],
+    searchSeriesMany: (queries) => searchQueries(queries, searchDiziboxSeries, 5000),
+    getEpisodeStreams: getDiziboxEpisodeStreams
+  },
+  {
     id: 'tvdiziler',
     name: 'TvDiziler',
     searchTimeoutMs: 8000,
@@ -1959,6 +2139,8 @@ module.exports = {
   getHdfilmcehennemiStreams,
   searchWebteIzle,
   getWebteIzleStreams,
+  searchDiziboxSeries,
+  getDiziboxEpisodeStreams,
   searchJetFilm,
   getJetFilmStreams,
   getJetFilmEpisodeStreams,

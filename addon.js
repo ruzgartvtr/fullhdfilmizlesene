@@ -82,7 +82,7 @@ const manifest = {
     id: 'community.turkish-film-sources',
     version: '2.1.0',
     name: 'Turkish Film Sources',
-    description: 'Hızlandırılmış Türkçe film ve dizi kaynakları. Çalışan kaynaklar: HDFilmCehennemi, FullHDFilm, SinekFilm, Filmmodu, JetFilm, AvsarFilm, InternetArchive, DiziFilmizle, Diziyou, Ddizi, TvDiziler ve YouTube fallback.',
+    description: 'Hızlandırılmış Türkçe film ve dizi kaynakları. Çalışan kaynaklar: HDFilmCehennemi, FullHDFilm, SinekFilm, Filmmodu, JetFilm, AvsarFilm, InternetArchive, Dizibox, DiziFilmizle, Diziyou, Ddizi, TvDiziler ve YouTube fallback.',
     resources: ['stream'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
@@ -295,12 +295,13 @@ function getDirectProviderMatches(imdbId) {
 function getProviderPriority(provider, contentType) {
     const seriesPriority = {
         YouTube: 0,
-        TvDiziler: 1,
-        HDFilmCehennemi: 2,
-        Ddizi: 3,
-        DiziFilmizle: 4,
-        Diziyou: 5,
-        JetFilm: 6
+        Dizibox: 1,
+        TvDiziler: 2,
+        HDFilmCehennemi: 3,
+        Ddizi: 4,
+        DiziFilmizle: 5,
+        Diziyou: 6,
+        JetFilm: 7
     };
     const moviePriority = {
         HDFilmCehennemi: 0,

@@ -11,10 +11,11 @@ const META_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 15 * 60 * 1000;
 const STREAM_CACHE_TTL_MS = 4 * 60 * 1000;
 const ALIAS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const FAST_META_TIMEOUT_MS = Number(process.env.FAST_META_TIMEOUT_MS || 8000);
+const FAST_META_TIMEOUT_MS = Number(process.env.FAST_META_TIMEOUT_MS || 6000);
 const WIKIDATA_SPARQL_URL = 'https://query.wikidata.org/sparql';
 const YOUTUBE_STREAM_MODE = String(process.env.YOUTUBE_STREAM_MODE || 'on').toLowerCase();
 const YOUTUBE_FALLBACK_ONLY = process.env.YOUTUBE_FALLBACK_ONLY === '1';
+const YOUTUBE_MOVIE_FALLBACK_ONLY = process.env.YOUTUBE_MOVIE_FALLBACK_ONLY !== '0';
 const FAST_RESPONSE_MODE = process.env.FAST_RESPONSE_MODE !== '0';
 const FAST_SEARCH_TIMEOUT_MS = Number(process.env.FAST_SEARCH_TIMEOUT_MS || 3500);
 const FAST_STREAM_TIMEOUT_MS = Number(process.env.FAST_STREAM_TIMEOUT_MS || 6500);
@@ -81,7 +82,7 @@ const manifest = {
     id: 'community.turkish-film-sources',
     version: '2.1.0',
     name: 'Turkish Film Sources',
-    description: 'Turkish movie and series streams from FullHDFilmizlesene, SinekFilm, AvsarFilm, JetFilm, Filmmodu, HDFilmCehennemi, DiziFilmizle, Diziyou, Ddizi, TvDiziler, YouTube and more.',
+    description: 'Hızlandırılmış Türkçe film ve dizi kaynakları. Çalışan kaynaklar: HDFilmCehennemi, FullHDFilm, SinekFilm, Filmmodu, JetFilm, AvsarFilm, DiziFilmizle, Diziyou, Ddizi, TvDiziler ve YouTube fallback.',
     resources: ['stream'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
@@ -648,7 +649,7 @@ builder.defineStreamHandler(async(args) => {
         queryTitle,
         hasLocalAliases,
         hasTurkishAliases: [...localAliases, ...dynamicAliases].some(hasTurkishText)
-    });
+    }).filter((provider) => !(contentType === 'movie' && provider.id === 'youtube' && YOUTUBE_MOVIE_FALLBACK_ONLY));
     const searchProvider = async(provider) => {
         const results = await withTimeout(
             memoizeAsync(

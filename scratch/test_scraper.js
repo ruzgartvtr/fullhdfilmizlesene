@@ -6,7 +6,7 @@ const proxy = require('../proxy');
 
 async function run() {
   assert.strictEqual(scraper.rot13('uryyb'), 'hello');
-  assert.strictEqual(addon._private.isYouTubeProviderEnabled(), false, 'YouTube streams should be off by default');
+  assert.strictEqual(addon._private.isYouTubeProviderEnabled(), true, 'YouTube streams should be on by default');
   assert.strictEqual(customStreams.isDirectVideoUrl('https://example.com/video.mp4'), true);
   assert.strictEqual(customStreams.isDirectVideoUrl('https://example.com/live/index.m3u8?token=1'), true);
   assert.strictEqual(customStreams.isDirectVideoUrl('https://cdn.example.com/m3u8/abc/master.txt?s=1'), true);
@@ -21,8 +21,11 @@ async function run() {
       { title: 'YouTube', ytId: 'abc12345678' },
       { title: 'HLS', url: 'https://example.com/master.m3u8' }
     ]),
-    [{ title: 'HLS', url: 'https://example.com/master.m3u8' }],
-    'Direct streams should hide YouTube fallback streams'
+    [
+      { title: 'YouTube', ytId: 'abc12345678' },
+      { title: 'HLS', url: 'https://example.com/master.m3u8' }
+    ],
+    'YouTube streams should remain visible next to direct streams by default'
   );
   assert.deepStrictEqual(
     addon._private.applyStreamPreferences([{ title: 'YouTube', ytId: 'abc12345678' }]),
@@ -47,6 +50,17 @@ async function run() {
     1,
     'Local movie fast path should search the top provider first'
   );
+  assert.strictEqual(
+    addon._private.getSearchProviders([
+      { name: 'HDFilmCehennemi' },
+      { name: 'FullHDFilm' },
+      { name: 'JetFilm' },
+      { name: 'Filmmodu' }
+    ], 'movie', { hasLocalAliases: true, hasTurkishAliases: true, queryTitle: 'The Devil Wears Prada' }).length,
+    4,
+    'Foreign-title movies with Turkish aliases should keep broad provider coverage'
+  );
+  assert(addon._private.getTitleAliases('tt0458352', 'The Devil Wears Prada').includes('Şeytan Marka Giyer'), 'Expected Turkish Devil Wears Prada alias');
   assert.strictEqual(
     addon._private.getSearchProviders([
       { name: 'HDFilmCehennemi' },

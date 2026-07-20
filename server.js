@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const { getRouter } = require('stremio-addon-sdk');
 const addonInterface = require('./addon');
 const { createProxyHandler } = require('./proxy');
@@ -7,6 +8,9 @@ const PORT = process.env.PORT || 7000;
 
 const app = express();
 
+app.get('/logo.png', (req, res) => {
+  res.sendFile(path.join(__dirname, 'LOGO.png'));
+});
 app.get('/proxy/:payload', createProxyHandler());
 app.use(getRouter(addonInterface));
 

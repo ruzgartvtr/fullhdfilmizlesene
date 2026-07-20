@@ -22,7 +22,15 @@ const FAST_MAX_SOURCES = Number(process.env.FAST_MAX_SOURCES || 3);
 const FAST_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_MOVIE_SEARCH_SOURCES || 1);
 const FAST_FOREIGN_MOVIE_SEARCH_SOURCES = Number(process.env.FAST_FOREIGN_MOVIE_SEARCH_SOURCES || 4);
 const FAST_SERIES_SEARCH_SOURCES = Number(process.env.FAST_SERIES_SEARCH_SOURCES || 2);
-const ADDON_BASE_URL = (process.env.ADDON_BASE_URL || `http://127.0.0.1:${process.env.PORT || 7000}`).replace(/\/$/, '');
+function getAddonBaseUrl() {
+    const value = process.env.ADDON_BASE_URL ||
+        process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+        process.env.VERCEL_URL ||
+        `http://127.0.0.1:${process.env.PORT || 7000}`;
+    return (/^https?:\/\//i.test(value) ? value : `https://${value}`).replace(/\/$/, '');
+}
+
+const ADDON_BASE_URL = getAddonBaseUrl();
 const TITLE_ALIASES = {
     tt19394770: ['Atatürk 1881 1919 2023', 'Ataturk 1881 1919 2023', 'Atatürk 1881 1919', 'Ataturk 1881 1919', 'Atatürk', 'Ataturk'],
     tt19396786: ['Atatürk 2 1881 1919', 'Atatürk II 1881 1919', 'Ataturk 2 1881 1919', 'Ataturk II 1881 1919', 'Atatürk 2', 'Ataturk 2'],
